@@ -1,0 +1,67 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-03-16 17:24:07.405312",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+    "role",
+    "content",
+    "render_type",
+    "raw_sql",
+    "raw_data"
+  ],
+  "fields": [
+    {
+      "fieldname": "role",
+      "label": "Role",
+      "fieldtype": "Select",
+      "options": "user\nmodel",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "content",
+      "label": "Message Content",
+      "fieldtype": "Text",
+      "reqd": 1
+    },
+    {
+      "fieldname": "render_type",
+      "label": "Render Type",
+      "fieldtype": "Select",
+      "options": "text\nnumber_card\nchart\ntable",
+      "default": "text"
+    },
+    {
+      "fieldname": "raw_sql",
+      "label": "Generated SQL",
+      "fieldtype": "Code",
+      "options": "SQL",
+      "description": "The exact MariaDB query the AI wrote to fetch this data."
+    },
+    {
+      "fieldname": "raw_data",
+      "label": "JSON Payload",
+      "fieldtype": "Code",
+      "options": "JSON",
+      "description": "The serialized data returned from the database."
+    }
+  ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-03-16 17:24:07.405312",
+ "modified_by": "Administrator",
+ "module": "Erpnext Gemini Integration",
+ "name": "AI Chat Message",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

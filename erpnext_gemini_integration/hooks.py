@@ -23,7 +23,12 @@ app_license = "mit"
 
 # Includes in <head>
 # ------------------
-
+app_include_css = [
+    "/assets/erpnext_gemini_integration/frontend/css/gemini_style.css"
+]
+app_include_js = [
+    "/assets/erpnext_gemini_integration/frontend/js/gemini_app.js"
+]
 # include js, css files in header of desk.html
 # app_include_css = "/assets/erpnext_gemini_integration/css/erpnext_gemini_integration.css"
 # app_include_js = "/assets/erpnext_gemini_integration/js/erpnext_gemini_integration.js"
