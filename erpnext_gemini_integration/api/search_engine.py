@@ -3,14 +3,43 @@ import json
 from rapidfuzz import process, fuzz
 import google.generativeai as genai
 
+# --- HELPER: THE TOKEN SAVER ---
+def clean_document_for_llm(doc_data):
+    """
+    Recursively strips Frappe's internal metadata and empty values 
+    from the parent doc AND all child tables to save LLM tokens.
+    """
+    if not isinstance(doc_data, dict):
+        return doc_data
+
+    useless_fields = [
+        'creation', 'modified', 'modified_by', 'owner', 'idx', 
+        'docstatus', '_user_tags', '_comments', '_assign', '_liked_by'
+    ]
+    
+    clean_dict = {}
+    for k, v in doc_data.items():
+        if k in useless_fields:
+            continue
+            
+        # Recursively clean lists of child dicts
+        if isinstance(v, list):
+            cleaned_list = [clean_document_for_llm(item) for item in v if isinstance(item, dict)]
+            if cleaned_list: # Only keep the list if it has items
+                clean_dict[k] = cleaned_list
+        # Keep values that aren't empty
+        elif v not in (None, "", []):
+            clean_dict[k] = v
+            
+    return clean_dict
+
+
 # --- 1. THE SNIPER (Exact @ Tag Matching) ---
 
 def fetch_doc_by_prefix(doc_name):
     """
     Instantly fetches a Frappe document based on its naming prefix.
-    Bypasses AI entirely for blazing fast data retrieval.
     """
-    # The hardcoded dictionary mapping. Faster than querying Frappe's naming series.
     prefix_map = {
         "PROJ": "Project",
         "EMP": "Employee",
@@ -28,31 +57,22 @@ def fetch_doc_by_prefix(doc_name):
     prefix = doc_name.split("-")[0].upper()
     target_doctype = prefix_map.get(prefix)
 
-    # If the prefix isn't in our dictionary, gracefully back out
     if not target_doctype:
         return None
 
     try:
-        # Check if it actually exists before fetching to avoid tracebacks
+        # THE FIX: Check permissions first, then fetch!
+        if not frappe.has_permission(target_doctype, "read"):
+            return {"error": f"You don't have permission to read {target_doctype} records."}
+
         if not frappe.db.exists(target_doctype, doc_name):
             return {"error": f"{target_doctype} {doc_name} does not exist. Did you make that up?"}
             
-        doc_data = frappe.get_doc(target_doctype, doc_name).as_dict()
+        # THE FIX: Actually fetch the document
+        raw_doc = frappe.get_doc(target_doctype, doc_name).as_dict()
         
-        # --- THE TOKEN SAVER DIET ---
-        # Stripping Frappe's internal metadata saves massive amounts of LLM context window.
-        useless_fields = [
-            'creation', 'modified', 'modified_by', 'owner', 'idx', 
-            'docstatus', '_user_tags', '_comments', '_assign', '_liked_by'
-        ]
-        
-        for field in useless_fields:
-            doc_data.pop(field, None)
-
-        # Remove nulls and empty lists to keep the JSON payload microscopic
-        clean_data = {k: v for k, v in doc_data.items() if v not in (None, "", [])}
-
-        return clean_data
+        # THE FIX: Use our new recursive cleaner
+        return clean_document_for_llm(raw_doc)
 
     except Exception as e:
         frappe.log_error(f"Failed to fetch @ tag {doc_name}: {str(e)}", "AI Search Engine")
@@ -71,9 +91,8 @@ def run_fuzzy_search(user_message):
         return {"error": "API Key missing."}
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-3.1-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash')
 
-    # Step A: The Extractor Prompt
     extract_prompt = f"""
     The user is trying to search the ERP system. Extract the target DocType and the search string.
     Map their intent to one of these core DocTypes ONLY: ['Employee', 'Customer', 'Project', 'Sales Invoice', 'Task']
@@ -88,35 +107,39 @@ def run_fuzzy_search(user_message):
         search_params = json.loads(clean_json)
         target_doctype = search_params.get("doctype")
         search_string = search_params.get("search_string")
-    except Exception:
+    except Exception as e:
+        # THE FIX: Actually log the error!
+        frappe.log_error(f"AI Extraction Failed: {str(e)}\nResponse: {response}", "AI Fuzzy Search")
         return {"error": "Could not determine what specific record you are looking for."}
 
     if not target_doctype or not search_string:
         return {"error": "Not enough info to perform a targeted search."}
 
-    # Step B: Fetch the Haystack
+    # THE FIX: Check permissions before querying 5000 rows!
+    if not frappe.has_permission(target_doctype, "read"):
+         return {"error": f"You do not have permission to search {target_doctype} records."}
+
     try:
         meta = frappe.get_meta(target_doctype)
-        # We need something descriptive to search against, usually the 'name' or a title field
         title_field = meta.title_field or "name"
         
-        # Limit 5000 is our safety valve so we don't load a million rows into RAM
         candidates = frappe.get_all(
             target_doctype, 
             fields=["name", title_field],
             limit_page_length=5000 
         )
     except Exception as e:
-        return {"error": f"Failed to fetch {target_doctype} records for searching: {str(e)}"}
+        frappe.log_error(f"Database fetch failed: {str(e)}", "AI Fuzzy Search")
+        return {"error": f"Failed to fetch {target_doctype} records for searching."}
 
     if not candidates:
         return {"message": f"No {target_doctype} records exist in the system to search through."}
 
-    # Step C: The C++ Magic (RapidFuzz)
-    # We map the candidates into a dictionary of { "ID": "ID - Title" }
+    # Step C: The C++ Magic
     choices = {doc.name: f"{doc.name} - {doc.get(title_field, '')}" for doc in candidates}
     
-    # fuzz.WRatio handles word-order changes and casing beautifully
+    # process.extract returns a list of tuples: (match_string, score, key)
+    # The key is our doc.name!
     top_matches = process.extract(
         search_string, 
         choices, 
@@ -127,19 +150,21 @@ def run_fuzzy_search(user_message):
     # Step D: Assemble the Context
     results_context = []
     for match_string, score, doc_name in top_matches:
-        # Ignore terrible matches (under 50% confidence)
         if score < 50:
             continue 
             
-        # Fetch the full document data for the good matches, using our token saver logic
-        full_doc = frappe.get_doc(target_doctype, doc_name).as_dict()
-        for field in ['creation', 'modified', 'modified_by', 'owner', 'idx']:
-            full_doc.pop(field, None)
+        try:
+            raw_doc = frappe.get_doc(target_doctype, doc_name).as_dict()
+            # THE FIX: Use our recursive cleaner here too!
+            clean_doc = clean_document_for_llm(raw_doc)
             
-        results_context.append({
-            "match_confidence": f"{round(score)}%",
-            "document": full_doc
-        })
+            results_context.append({
+                "match_confidence": f"{round(score)}%",
+                "document": clean_doc
+            })
+        except Exception as e:
+             frappe.log_error(f"Failed to load matched doc {doc_name}: {str(e)}", "AI Fuzzy Search")
+             continue # If one doc fails, keep trying the others
 
     if not results_context:
         return {"message": f"I dug through the {target_doctype} records, but couldn't find anything close to '{search_string}'."}
