@@ -1,23 +1,43 @@
 <script setup>
-import { ref, defineEmits, defineProps } from 'vue'
+import { ref, defineEmits, defineProps, nextTick } from 'vue'
 
 const emit = defineEmits(['submit'])
 const props = defineProps({ disabled: Boolean })
 
 const userInput = ref('')
 const showMentionPopover = ref(false)
+const inputRef = ref(null) // Added so we can focus the textarea
 
 const handleInput = (e) => {
   const text = e.target.value
   const cursorPosition = e.target.selectionStart
   const textBeforeCursor = text.slice(0, cursorPosition)
   
-  // Basic detection for opening the @ menu
   if (textBeforeCursor.match(/@[a-zA-Z0-9-]*$/)) {
     showMentionPopover.value = true
   } else {
     showMentionPopover.value = false
   }
+}
+
+const handleKeydown = (e) => {
+  // If they hit Enter WITHOUT Shift, send the message
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault() // Stop it from adding a new line
+    triggerSend()
+  }
+  // If they hit Shift+Enter, do nothing, just let the textarea add a new line naturally
+}
+
+const insertTag = (tag) => {
+  // Replace the "@" part with the actual tag
+  userInput.value = userInput.value.replace(/@[a-zA-Z0-9-]*$/, tag + ' ')
+  showMentionPopover.value = false
+  
+  // Bring focus back to the input so they can keep typing
+  nextTick(() => {
+    inputRef.value?.focus()
+  })
 }
 
 const triggerSend = () => {
@@ -35,10 +55,10 @@ const triggerSend = () => {
          class="absolute bottom-full mb-2 left-0 w-full bg-slate-800 border border-slate-700 rounded-lg shadow-xl p-2 z-50">
       <div class="text-xs text-slate-400 font-semibold mb-1 px-2 uppercase tracking-wider">Quick Tag</div>
       <ul class="text-sm text-slate-300 space-y-1">
-        <li class="p-2 hover:bg-slate-700 hover:text-orange-400 rounded transition-colors">
+        <li @click="insertTag('@PROJ-')" class="p-2 cursor-pointer hover:bg-slate-700 hover:text-orange-400 rounded transition-colors flex items-center">
           <span class="font-mono text-orange-500 text-xs mr-2">PROJ</span> Type project ID
         </li>
-        <li class="p-2 hover:bg-slate-700 hover:text-orange-400 rounded transition-colors">
+        <li @click="insertTag('@EMP-')" class="p-2 cursor-pointer hover:bg-slate-700 hover:text-orange-400 rounded transition-colors flex items-center">
           <span class="font-mono text-orange-500 text-xs mr-2">EMP</span> Type employee ID
         </li>
       </ul>
@@ -46,11 +66,12 @@ const triggerSend = () => {
 
     <div class="relative flex items-center">
       <textarea 
+        ref="inputRef"
         v-model="userInput"
         @input="handleInput"
-        @keydown.enter.prevent="triggerSend"
+        @keydown="handleKeydown"
         :disabled="disabled"
-        placeholder="Ask for a report, or type @ to link data..."
+        placeholder="Ask for a report, or type @ to link data... (Shift+Enter for new line)"
         class="w-full bg-slate-800/50 text-slate-200 rounded-xl py-3 pl-4 pr-12 focus:outline-none focus:ring-1 focus:ring-orange-500/50 border border-transparent focus:border-orange-500/30 resize-none h-[52px] overflow-hidden transition-all placeholder-slate-500 text-sm disabled:opacity-50"
         rows="1"
       ></textarea>

@@ -47,9 +47,15 @@ def process_user_message(user_message, session_id=None):
     if intent == "data_request":
         sql_payload = generate_and_run_sql(user_message)
         if "error" not in sql_payload:
-            context_block.append(f"Database Query Results:\n{json.dumps(sql_payload.get('data'), default=str)}")
+            # THE FIX: Only feed Gemini the first 15 rows so we don't blow up the token limit!
+            raw_data = sql_payload.get("data", [])
+            sample_data = raw_data[:15] 
+            
+            context_block.append(f"Database Query Results (Sample):\n{json.dumps(sample_data, default=str)}")
+            
+            # The frontend still gets the FULL data to render the table/chart
             render_type = sql_payload.get("render_type", "table")
-            render_data = sql_payload.get("data")
+            render_data = raw_data 
             raw_sql = sql_payload.get("query")
         else:
             context_block.append(f"System Error: {sql_payload.get('error')}")
@@ -63,8 +69,12 @@ def process_user_message(user_message, session_id=None):
     chat_history = get_gemini_formatted_history(session_id)
     
     system_prompt = f"""
-    You are an elite ERP data analyst for the C-Suite. Be confident, witty, and concise. 
-    If context data is provided below, summarize it or answer the user's prompt based on it.
+    You are an elite ERP data analyst for the C-Suite.
+    A database query was executed to answer the user's prompt. The raw results are provided below in the context block.
+    
+    CRITICAL INSTRUCTIONS:
+    1. DO NOT echo, format, or print the raw JSON data or arrays in your response. The system UI will render the charts automatically.
+    2. Your ONLY job is to write a confident, 1-2 sentence human-readable summary of the findings (e.g., "Here is the revenue breakdown. March was our strongest month!").
     
     --- START ASSEMBLED CONTEXT ---
     {chr(10).join(context_block)}
@@ -72,7 +82,7 @@ def process_user_message(user_message, session_id=None):
     """
     
     genai.configure(api_key=frappe.conf.get("gemini_api_key"))
-    model = genai.GenerativeModel('gemini-3.1-pro', system_instruction=system_prompt)
+    model = genai.GenerativeModel('gemini-2.5-pro', system_instruction=system_prompt)
     
     try:
         chat = model.start_chat(history=chat_history)
@@ -131,19 +141,23 @@ def add_message_to_session(session_id, role, content, render_type="text", raw_sq
     frappe.db.commit() # Force commit so the next API call sees it
 
 def get_gemini_formatted_history(session_id):
-    """Pulls the last 6 messages and formats them for the Gemini API."""
+    """Pulls the last 6 messages and formats them for the Gemini API, excluding the currently processing message."""
     messages = frappe.get_all(
         "AI Chat Message",
         filters={"parent": session_id},
         fields=["role", "content"],
         order_by="idx desc",
-        limit_page_length=6
+        limit_page_length=7 # Fetch 7 so we can safely drop the newest 1 and keep 6
     )
+    
+    # THE FIX: Drop the first item in the list (which is the user message we JUST saved)
+    if messages and messages[0].role == "user":
+        messages = messages[1:]
+        
     messages.reverse()
     
     history = []
     for msg in messages:
-        # Avoid passing the current user message twice, just the history
         history.append({
             "role": "user" if msg.role == "user" else "model",
             "parts": [msg.content]

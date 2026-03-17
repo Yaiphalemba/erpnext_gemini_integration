@@ -1,35 +1,38 @@
 <script setup>
-import { defineProps } from 'vue'
-// Import your custom chart/table components
+import { defineProps, computed } from 'vue'
 import SleekNumberCard from './charts/SleekNumberCard.vue'
 import SleekBarChart from './charts/SleekBarChart.vue'
 import MinimalTable from './charts/MinimalTable.vue'
 
 const props = defineProps({
-  type: String, // 'number_card', 'chart', 'table'
-  data: Array,
-  rawSql: String
+  renderType: { type: String, default: 'text' },
+  data: { type: Array, default: () => [] }
 })
 
-const pinToDashboard = async () => {
-  // Triggers the Frappe backend whitelist function we mapped out earlier
-  console.log("Pinning query to dashboard:", props.rawSql)
-  // frappe.call(...)
-}
+const currentComponent = computed(() => {
+  switch (props.renderType) {
+    case 'number_card': return SleekNumberCard
+    case 'chart': return SleekBarChart
+    case 'table': return MinimalTable
+    default: return null
+  }
+})
 </script>
 
 <template>
-  <div class="relative group bg-slate-800/50 rounded-xl p-1 border border-white/5">
+  <div v-if="currentComponent" class="mt-4 w-full">
     
-    <button @click="pinToDashboard" 
-            class="absolute top-2 right-2 p-1.5 bg-slate-700 hover:bg-orange-500 text-slate-300 hover:text-white rounded-md opacity-0 group-hover:opacity-100 transition-all z-10"
-            title="Pin to Dashboard">
-      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"></path></svg>
-    </button>
+    <div v-if="!data || data.length === 0" class="bg-slate-800/40 border border-slate-700/50 rounded-xl p-6 flex flex-col items-center justify-center text-center space-y-2">
+      <div class="p-3 bg-slate-800/80 rounded-full shadow-inner mb-1">
+        <svg class="w-6 h-6 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+        </svg>
+      </div>
+      <span class="text-sm font-medium text-slate-300">Zero records found</span>
+      <span class="text-xs text-slate-500 max-w-[80%]">The AI wrote a flawless query, but the database came up empty for those specific conditions.</span>
+    </div>
 
-    <SleekNumberCard v-if="type === 'number_card'" :data="data" />
-    <SleekBarChart v-else-if="type === 'chart'" :data="data" />
-    <MinimalTable v-else-if="type === 'table'" :data="data" />
+    <component v-else :is="currentComponent" :data="data" />
     
   </div>
 </template>

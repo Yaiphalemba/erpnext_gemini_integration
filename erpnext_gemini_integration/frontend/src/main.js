@@ -1,20 +1,17 @@
+// src/main.js
 import { createApp } from 'vue'
 import App from './App.vue'
-import './style.css' // Your Tailwind CSS file
+import './style.css'
 
-// Wait for Frappe to finish loading the desk
-document.addEventListener('DOMContentLoaded', () => {
-  
-  // 1. Create a hidden wrapper div for our AI drawer
-  const geminiWrapper = document.createElement('div')
-  geminiWrapper.id = 'gemini-ai-workspace'
-  
-  // 2. Append it right to the body so it sits above everything
-  document.body.appendChild(geminiWrapper)
+const mountId = 'gemini-chat-drawer';
+let mountEl = document.getElementById(mountId);
 
-  // 3. Mount our beautiful cinematic Vue app to it
-  const app = createApp(App)
-  app.mount('#gemini-ai-workspace')
+// If Frappe doesn't have the element, build it yourself
+if (!mountEl) {
+    mountEl = document.createElement('div');
+    mountEl.id = mountId;
+    document.body.appendChild(mountEl);
+}
 
-  console.log("Gemini Analyst Drawer Initialized. Ready to crush some data.")
-})
+createApp(App).mount(mountEl);
+console.log("Gemini Analyst Drawer Initialized. Ready to crush some data.")
